@@ -9,7 +9,7 @@ export class TeamCompDiffAwsStack extends cdk.Stack {
 
     //Create a pipeline for development so that devs can test different things
     new CodePipeline(this, "DevPipeline", {
-      pipelineName: "DevPapyrusAiPipeline",
+      pipelineName: "DevPipeline",
       synth: new ShellStep("Synth", {
         input: CodePipelineSource.gitHub("KristiWerry/TeamCompDiff-AWS", "dev"),
         commands: ["npm ci", "npm run build", "npx cdk synth"],
