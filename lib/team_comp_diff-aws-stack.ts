@@ -1,16 +1,20 @@
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import * as cdk from "aws-cdk-lib";
+import { CodePipeline, CodePipelineSource, ShellStep } from "aws-cdk-lib/pipelines";
+import { Construct } from "constructs";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class TeamCompDiffAwsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
-
-    // example resource
-    // const queue = new sqs.Queue(this, 'TeamCompDiffAwsQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
+    //Create a pipeline for development so that devs can test different things
+    new CodePipeline(this, "DevPipeline", {
+      pipelineName: "DevPapyrusAiPipeline",
+      synth: new ShellStep("Synth", {
+        input: CodePipelineSource.gitHub("KristiWerry/TeamCompDiff-AWS", "dev"),
+        commands: ["npm ci", "npm run build", "npx cdk synth"],
+      }),
+      crossAccountKeys: true,
+    });
   }
 }
