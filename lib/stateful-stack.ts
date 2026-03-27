@@ -1,0 +1,108 @@
+import * as cdk from "aws-cdk-lib";
+import { Construct } from "constructs";
+import {
+  AccountRecovery,
+  Mfa,
+  OAuthScope,
+  StringAttribute,
+  UserPool,
+  UserPoolClientIdentityProvider,
+  UserPoolEmail,
+  VerificationEmailStyle,
+} from "aws-cdk-lib/aws-cognito";
+
+interface StatefulTeampCompDiffStackProps extends cdk.StackProps {
+  region: string;
+}
+
+export class StatefulTeampCompDiffStack extends cdk.Stack {
+  public readonly loginUrl: string;
+  public readonly client: cdk.aws_cognito.UserPoolClient;
+  public readonly userpool: cdk.aws_cognito.UserPool;
+
+  constructor(scope: Construct, id: string, stageName: string, props: StatefulTeampCompDiffStackProps) {
+    super(scope, id, props);
+
+    //create cognito pool with domain and client
+    var userpoolParams: any = {
+      userPoolName: "TeamCompDiff",
+      signInCaseSensitive: false, // case insensitive is preferred in most situations
+      selfSignUpEnabled: true,
+      userVerification: {
+        emailSubject: `Verify your email for PapyrusAI for Team Comp Diff!`,
+        emailBody: `Thanks for signing up to PapyrusAI for Team Comp Diff! Your verification code is {####}. \n
+          Enter the verification code to set up your account within 10 minutes of receiving this email or you may encounter an error with logging in.
+          `,
+        emailStyle: VerificationEmailStyle.CODE,
+        smsMessage: `Thanks for signing up to PapyrusAI for Team Comp Diff! Your verification code is {####}`,
+      },
+      signInAliases: {
+        email: true,
+      },
+      autoVerify: { email: true },
+      keepOriginal: {
+        email: true,
+      },
+      mfa: Mfa.OFF,
+      accountRecovery: AccountRecovery.EMAIL_ONLY,
+      deletionProtection: true,
+      standardAttributes: {
+        email: {
+          required: true,
+          mutable: true,
+        },
+      },
+      customAttributes: {
+        theme: new StringAttribute({ mutable: true }),
+        textSize: new StringAttribute({ mutable: true }),
+        language: new StringAttribute({ mutable: true }),
+      },
+    };
+    if (stageName === "prod") {
+      //if we are on prod, then attach ses
+      userpoolParams["email"] = UserPoolEmail.withSES({
+        fromEmail: "noreply@papyrusai.org",
+        fromName: "PapyrusAI",
+        replyTo: "support@papyrusai.org",
+        sesVerifiedDomain: "papyrusai.org",
+      });
+    }
+    const userpool = new UserPool(this, "TeamCompDiff", userpoolParams as cdk.aws_cognito.UserPoolProps);
+    //userpool client
+    const client = userpool.addClient("TempCompDiff-client", {
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+          implicitCodeGrant: true,
+        },
+        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PHONE],
+        callbackUrls: [
+          //TODO
+        ],
+      },
+      authFlows: {
+        custom: true,
+        userSrp: true,
+      },
+      authSessionValidity: cdk.Duration.minutes(15),
+      accessTokenValidity: cdk.Duration.days(1),
+      idTokenValidity: cdk.Duration.days(1),
+      refreshTokenValidity: cdk.Duration.days(30),
+      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
+    });
+    const clientId = client.userPoolClientId;
+    const domainName = "TempCompDiffDomain";
+    const domainPrefix = "tempcompdiff";
+    const domain = userpool.addDomain(domainName, {
+      cognitoDomain: {
+        domainPrefix: domainPrefix,
+      },
+    });
+    this.loginUrl = domain
+      .signInUrl(client, {
+        redirectUri: "",
+        //TODO // must be a URL configured under 'callbackUrls' with the client
+      })
+      .replace("code", "token"); //replace to get access token
+  }
+}
