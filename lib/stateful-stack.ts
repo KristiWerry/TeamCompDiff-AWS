@@ -27,14 +27,14 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
     var userpoolParams: any = {
       userPoolName: "TeamCompDiff",
       signInCaseSensitive: false, // case insensitive is preferred in most situations
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: false, // public can NOT create accounts
       userVerification: {
-        emailSubject: `Verify your email for PapyrusAI for Team Comp Diff!`,
-        emailBody: `Thanks for signing up to PapyrusAI for Team Comp Diff! Your verification code is {####}. \n
+        emailSubject: `Verify your email for Team Comp Diff!`,
+        emailBody: `Thanks for signing up to Team Comp Diff! Your verification code is {####}. \n
           Enter the verification code to set up your account within 10 minutes of receiving this email or you may encounter an error with logging in.
           `,
         emailStyle: VerificationEmailStyle.CODE,
-        smsMessage: `Thanks for signing up to PapyrusAI for Team Comp Diff! Your verification code is {####}`,
+        smsMessage: `Thanks for signing up to Team Comp Diff! Your verification code is {####}`,
       },
       signInAliases: {
         email: true,
@@ -52,57 +52,43 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
           mutable: true,
         },
       },
-      customAttributes: {
-        theme: new StringAttribute({ mutable: true }),
-        textSize: new StringAttribute({ mutable: true }),
-        language: new StringAttribute({ mutable: true }),
-      },
     };
-    if (stageName === "prod") {
-      //if we are on prod, then attach ses
-      userpoolParams["email"] = UserPoolEmail.withSES({
-        fromEmail: "noreply@papyrusai.org",
-        fromName: "PapyrusAI",
-        replyTo: "support@papyrusai.org",
-        sesVerifiedDomain: "papyrusai.org",
-      });
-    }
-    const userpool = new UserPool(this, "TeamCompDiff", userpoolParams as cdk.aws_cognito.UserPoolProps);
+    this.userpool = new UserPool(this, "TeamCompDiff", userpoolParams as cdk.aws_cognito.UserPoolProps);
+    //uncomment when we have domain
     //userpool client
-    const client = userpool.addClient("TempCompDiff-client", {
-      oAuth: {
-        flows: {
-          authorizationCodeGrant: true,
-          implicitCodeGrant: true,
-        },
-        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PHONE],
-        callbackUrls: [
-          //TODO
-        ],
-      },
-      authFlows: {
-        custom: true,
-        userSrp: true,
-      },
-      authSessionValidity: cdk.Duration.minutes(15),
-      accessTokenValidity: cdk.Duration.days(1),
-      idTokenValidity: cdk.Duration.days(1),
-      refreshTokenValidity: cdk.Duration.days(30),
-      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
-    });
-    const clientId = client.userPoolClientId;
-    const domainName = "TempCompDiffDomain";
-    const domainPrefix = "tempcompdiff";
-    const domain = userpool.addDomain(domainName, {
-      cognitoDomain: {
-        domainPrefix: domainPrefix,
-      },
-    });
-    this.loginUrl = domain
-      .signInUrl(client, {
-        redirectUri: "",
-        //TODO // must be a URL configured under 'callbackUrls' with the client
-      })
-      .replace("code", "token"); //replace to get access token
+    // const client = userpool.addClient("TempCompDiff-client", {
+    //   oAuth: {
+    //     flows: {
+    //       authorizationCodeGrant: true,
+    //     },
+    //     scopes: [OAuthScope.OPENID],
+    //     callbackUrls: [
+    //       //TODO
+    //     ],
+    //   },
+    //   authFlows: {
+    //     custom: true,
+    //     userSrp: true,
+    //   },
+    //   authSessionValidity: cdk.Duration.minutes(15),
+    //   accessTokenValidity: cdk.Duration.days(1),
+    //   idTokenValidity: cdk.Duration.days(1),
+    //   refreshTokenValidity: cdk.Duration.days(30),
+    //   supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
+    // });
+    // const clientId = client.userPoolClientId;
+    // const domainName = "TempCompDiffDomain";
+    // const domainPrefix = "tempcompdiff";
+    // const domain = userpool.addDomain(domainName, {
+    //   cognitoDomain: {
+    //     domainPrefix: domainPrefix,
+    //   },
+    // });
+    // this.loginUrl = domain
+    //   .signInUrl(client, {
+    //     redirectUri: "",
+    //     //TODO // must be a URL configured under 'callbackUrls' with the client
+    //   })
+    //   .replace("code", "token"); //replace to get access token
   }
 }
