@@ -16,7 +16,8 @@ interface StatefulTeampCompDiffStackProps extends cdk.StackProps {
 }
 
 export class StatefulTeampCompDiffStack extends cdk.Stack {
-  public readonly loginUrl: string;
+  public readonly userpoolId: string;
+  public readonly userpoolClientId: string;
   public readonly client: cdk.aws_cognito.UserPoolClient;
   public readonly userpool: cdk.aws_cognito.UserPool;
 
@@ -55,37 +56,35 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
     };
     this.userpool = new UserPool(this, "TeamCompDiff", userpoolParams as cdk.aws_cognito.UserPoolProps);
     //uncomment when we have domain
+    this.userpoolId = this.userpoolId;
     //userpool client
-    // const client = userpool.addClient("TempCompDiff-client", {
-    //   oAuth: {
-    //     flows: {
-    //       authorizationCodeGrant: true,
-    //     },
-    //     scopes: [OAuthScope.OPENID],
-    //     callbackUrls: [
-    //       //TODO
-    //     ],
-    //   },
-    //   authFlows: {
-    //     custom: true,
-    //     userSrp: true,
-    //   },
-    //   authSessionValidity: cdk.Duration.minutes(15),
-    //   accessTokenValidity: cdk.Duration.days(1),
-    //   idTokenValidity: cdk.Duration.days(1),
-    //   refreshTokenValidity: cdk.Duration.days(30),
-    //   supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
-    // });
-    // const clientId = client.userPoolClientId;
-    // const domainName = "TempCompDiffDomain";
-    // const domainPrefix = "tempcompdiff";
-    // const domain = userpool.addDomain(domainName, {
-    //   cognitoDomain: {
-    //     domainPrefix: domainPrefix,
-    //   },
-    // });
+    this.client = this.userpool.addClient("TempCompDiff-client", {
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+        },
+        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PHONE],
+      },
+      authFlows: {
+        custom: true,
+        userSrp: true,
+      },
+      authSessionValidity: cdk.Duration.minutes(15),
+      accessTokenValidity: cdk.Duration.days(1),
+      idTokenValidity: cdk.Duration.days(1),
+      refreshTokenValidity: cdk.Duration.days(30),
+      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
+    });
+    this.userpoolClientId = this.client.userPoolClientId;
+    const domainName = "TempCompDiffDomain";
+    const domainPrefix = "tempcompdiff";
+    const domain = this.userpool.addDomain(domainName, {
+      cognitoDomain: {
+        domainPrefix: domainPrefix,
+      },
+    });
     // this.loginUrl = domain
-    //   .signInUrl(client, {
+    //   .signInUrl(this.client, {
     //     redirectUri: "",
     //     //TODO // must be a URL configured under 'callbackUrls' with the client
     //   })
