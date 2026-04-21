@@ -26,7 +26,7 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
 
     //create cognito pool with domain and client
     var userpoolParams: any = {
-      userPoolName: "TeamCompDiff",
+      userPoolName: "TeamCompDiff" + stageName,
       signInCaseSensitive: false, // case insensitive is preferred in most situations
       selfSignUpEnabled: false, // public can NOT create accounts
       userVerification: {
@@ -54,11 +54,11 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
         },
       },
     };
-    this.userpool = new UserPool(this, "TeamCompDiff", userpoolParams as cdk.aws_cognito.UserPoolProps);
+    this.userpool = new UserPool(this, "TeamCompDiff" + stageName, userpoolParams as cdk.aws_cognito.UserPoolProps);
     //uncomment when we have domain
     this.userpoolId = this.userpoolId;
     //userpool client
-    this.client = this.userpool.addClient("TempCompDiff-client", {
+    this.client = this.userpool.addClient("TempCompDiff-client" + stageName, {
       oAuth: {
         flows: {
           authorizationCodeGrant: true,
@@ -76,13 +76,13 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
       supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
     });
     this.userpoolClientId = this.client.userPoolClientId;
-    const domainName = "TempCompDiffDomain";
-    const domainPrefix = "tempcompdiff";
-    const domain = this.userpool.addDomain(domainName, {
-      cognitoDomain: {
-        domainPrefix: domainPrefix,
-      },
-    });
+    // const domainName = "TempCompDiffDomain" + stageName;
+    // const domainPrefix = "tempcompdiff";
+    // const domain = this.userpool.addDomain(domainName, {
+    //   cognitoDomain: {
+    //     domainPrefix: domainPrefix,
+    //   },
+    // });
     // this.loginUrl = domain
     //   .signInUrl(this.client, {
     //     redirectUri: "",
