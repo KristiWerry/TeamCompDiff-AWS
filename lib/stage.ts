@@ -19,7 +19,6 @@ export class MyPipelineAppStage extends cdk.Stage {
     // only lambdas and sns and rest api
     const StatelessStack = new StatelessTeamCompDiffStack(this, "StatelessTeamCompDiffStack", stageName, {
       region: props.region,
-      loginUrl: StatefulStack.loginUrl,
       client: StatefulStack.client,
       userpool: StatefulStack.userpool,
     });
@@ -27,7 +26,8 @@ export class MyPipelineAppStage extends cdk.Stage {
     // frontends stack
     const ClientStack = new ClientTeamCompDiffStack(this, "ClientTeamCompDiffStack", stageName, {
       apiUrl: StatelessStack.apiUrl,
-      loginUrl: StatefulStack.loginUrl,
+      userpoolId: StatefulStack.userpoolId,
+      userpoolClientId: StatefulStack.userpoolClientId,
     });
   }
 }
