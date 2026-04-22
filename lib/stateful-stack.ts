@@ -11,17 +11,17 @@ import {
   VerificationEmailStyle,
 } from "aws-cdk-lib/aws-cognito";
 
-interface StatefulTeampCompDiffStackProps extends cdk.StackProps {
+interface StatefulTeamCompDiffStackProps extends cdk.StackProps {
   region: string;
 }
 
-export class StatefulTeampCompDiffStack extends cdk.Stack {
+export class StatefulTeamCompDiffStack extends cdk.Stack {
   public readonly userpoolId: string;
   public readonly userpoolClientId: string;
   public readonly client: cdk.aws_cognito.UserPoolClient;
   public readonly userpool: cdk.aws_cognito.UserPool;
 
-  constructor(scope: Construct, id: string, stageName: string, props: StatefulTeampCompDiffStackProps) {
+  constructor(scope: Construct, id: string, stageName: string, props: StatefulTeamCompDiffStackProps) {
     super(scope, id, props);
 
     //create cognito pool with domain and client

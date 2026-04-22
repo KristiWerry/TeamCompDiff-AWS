@@ -1,6 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
-import { StatefulTeampCompDiffStack } from "./stateful-stack";
+import { StatefulTeamCompDiffStack } from "./stateful-stack";
 import { StatelessTeamCompDiffStack } from "./stateless-stack";
 import { ClientTeamCompDiffStack } from "./client-stack";
 
@@ -12,7 +12,7 @@ export class MyPipelineAppStage extends cdk.Stage {
   constructor(scope: Construct, stageName: string, props: MyPipelineAppStageProps) {
     super(scope, stageName, props);
     //dynamodb and cognito in stateful stack
-    const StatefulStack = new StatefulTeampCompDiffStack(this, "StatefulTeampCompDiffStack", stageName, {
+    const StatefulStack = new StatefulTeamCompDiffStack(this, "StatefulTeamCompDiffStack", stageName, {
       region: props.region,
     });
 
