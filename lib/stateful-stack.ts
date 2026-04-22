@@ -64,6 +64,14 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
           authorizationCodeGrant: true,
         },
         scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PHONE],
+        callbackUrls: [
+          "http://localhost:3000/callback", // dev
+          "https://yourdomain.com/callback", // prod TODO
+        ],
+        logoutUrls: [
+          "http://localhost:3000",
+          "https://yourdomain.com", //TODO
+        ],
       },
       authFlows: {
         custom: true,
@@ -76,18 +84,10 @@ export class StatefulTeampCompDiffStack extends cdk.Stack {
       supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
     });
     this.userpoolClientId = this.client.userPoolClientId;
-    // const domainName = "TempCompDiffDomain" + stageName;
-    // const domainPrefix = "tempcompdiff";
-    // const domain = this.userpool.addDomain(domainName, {
-    //   cognitoDomain: {
-    //     domainPrefix: domainPrefix,
-    //   },
-    // });
-    // this.loginUrl = domain
-    //   .signInUrl(this.client, {
-    //     redirectUri: "",
-    //     //TODO // must be a URL configured under 'callbackUrls' with the client
-    //   })
-    //   .replace("code", "token"); //replace to get access token
+    const domain = this.userpool.addDomain("TCD-CognitoDomain", {
+      cognitoDomain: {
+        domainPrefix: `teamcompdiff-${stageName.toLowerCase()}`, // must be globally unique
+      },
+    });
   }
 }
