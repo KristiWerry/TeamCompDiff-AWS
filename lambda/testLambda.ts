@@ -15,6 +15,6 @@ export const handler = async (event: any) => {
   return {
     statusCode: 200,
     headers: headers,
-    body: "This is a test from lamdba",
+    body: "Hello World. This is a test from lamdba",
   };
 };
