@@ -56,7 +56,7 @@ export class StatefulTeamCompDiffStack extends cdk.Stack {
     };
     this.userpool = new UserPool(this, "TeamCompDiff" + stageName, userpoolParams as cdk.aws_cognito.UserPoolProps);
     //uncomment when we have domain
-    this.userpoolId = this.userpoolId;
+    this.userpoolId = this.userpool.userPoolId;
     //userpool client
     this.client = this.userpool.addClient("TempCompDiff-client" + stageName, {
       oAuth: {

@@ -28,7 +28,7 @@ export class StatelessTeamCompDiffStack extends cdk.Stack {
     });
     const ACCEPTED_SCOPES = ["email", "aws.cognito.signin.user.admin"];
 
-    const api = new RestApi(this, "TeamCompDiffApi", {
+    const api = new RestApi(this, "TeamCompDiffApi" + stageName, {
       restApiName: "TeamCompDiffApi",
       defaultCorsPreflightOptions: {
         allowHeaders: ["Content-Type", "X-Amz-Date", "Authorization", "X-Api-Kay", "X-Session-Id"],
