@@ -33,7 +33,6 @@ export class StatelessTeamCompDiffStack extends cdk.Stack {
     const cognitoAuth = {
       authorizer: authorizer,
       authorizationType: AuthorizationType.COGNITO,
-      authorizationScopes: ["email", "aws.cognito.signin.user.admin"],
     };
 
     const api = new RestApi(this, "TeamCompDiffApi" + stageName, {
