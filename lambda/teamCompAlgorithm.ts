@@ -7,10 +7,12 @@ import Anthropic from "@anthropic-ai/sdk";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type UserRole = "top" | "jungle" | "mid" | "adc" | "support";
+type InputRole = UserRole | "fill";
 type Archetype = "Teamfight" | "Poke" | "Pick" | "SplitPush" | "EarlyGame";
 type PowerSpike = "early" | "mid" | "late";
 
 const USER_ROLES: UserRole[] = ["top", "jungle", "mid", "adc", "support"];
+const INPUT_ROLES: InputRole[] = [...USER_ROLES, "fill"];
 
 // champions.json uses "bot" for ADC — map at lookup time
 const CHAMP_ROLE: Record<UserRole, string> = {
@@ -22,7 +24,7 @@ const CHAMP_ROLE: Record<UserRole, string> = {
 };
 
 interface PlayerInput {
-  primaryRole: UserRole;
+  primaryRole: InputRole;
   secondaryRole?: UserRole;
   champPool: string[];
   riotId?: string;
@@ -562,8 +564,11 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   // Validate and apply profile fallback (champPool optional if player is the requesting user with no provided pool)
   const players: PlayerInput[] = [];
   for (const p of rawPlayers) {
-    if (!p.primaryRole || !USER_ROLES.includes(p.primaryRole)) {
-      return err(400, `primaryRole must be one of: ${USER_ROLES.join(", ")}`);
+    if (!p.primaryRole || !INPUT_ROLES.includes(p.primaryRole)) {
+      return err(400, `primaryRole must be one of: ${INPUT_ROLES.join(", ")}`);
+    }
+    if (p.primaryRole === "fill" && p.secondaryRole) {
+      return err(400, "secondaryRole cannot be set when primaryRole is fill");
     }
     if (p.secondaryRole && !USER_ROLES.includes(p.secondaryRole)) {
       return err(400, `secondaryRole must be one of: ${USER_ROLES.join(", ")}`);
