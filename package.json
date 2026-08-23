@@ -11,6 +11,11 @@
     "cdk": "cdk"
   },
   "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1101.0",
+    "@aws-sdk/client-lambda": "^3.1101.0",
+    "@aws-sdk/client-secrets-manager": "^3.1101.0",
+    "@aws-sdk/lib-dynamodb": "^3.1101.0",
+    "@types/aws-lambda": "^8.10.162",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.7.9",
     "aws-cdk": "^2.1118.4",
@@ -20,6 +25,7 @@
     "typescript": "~5.6.3"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@aws-cdk/aws-amplify-alpha": "^2.250.0-alpha.0",
     "aws-cdk-lib": "^2.250.0",
     "constructs": "^10.6.0"

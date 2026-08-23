@@ -21,6 +21,9 @@ export class MyPipelineAppStage extends cdk.Stage {
       region: props.region,
       client: StatefulStack.client,
       userpool: StatefulStack.userpool,
+      userDataTable: StatefulStack.userDataTable,
+      queriesTable: StatefulStack.queriesTable,
+      savedCompsTable: StatefulStack.savedCompsTable,
     });
 
     // frontends stack

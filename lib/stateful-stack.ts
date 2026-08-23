@@ -10,6 +10,7 @@ import {
   UserPoolEmail,
   VerificationEmailStyle,
 } from "aws-cdk-lib/aws-cognito";
+import { AttributeType, TableClass, TableV2 } from "aws-cdk-lib/aws-dynamodb";
 
 interface StatefulTeamCompDiffStackProps extends cdk.StackProps {
   region: string;
@@ -20,6 +21,9 @@ export class StatefulTeamCompDiffStack extends cdk.Stack {
   public readonly userpoolClientId: string;
   public readonly client: cdk.aws_cognito.UserPoolClient;
   public readonly userpool: cdk.aws_cognito.UserPool;
+  public userDataTable: cdk.aws_dynamodb.TableV2;
+  public queriesTable: cdk.aws_dynamodb.TableV2;
+  public savedCompsTable: cdk.aws_dynamodb.TableV2;
 
   constructor(scope: Construct, id: string, stageName: string, props: StatefulTeamCompDiffStackProps) {
     super(scope, id, props);
@@ -88,6 +92,51 @@ export class StatefulTeamCompDiffStack extends cdk.Stack {
       cognitoDomain: {
         domainPrefix: `teamcompdiff-${stageName.toLowerCase()}`, // must be globally unique
       },
+    });
+
+    /**
+     * DynamoDB tables
+     */
+
+    // Stores two item types per user:
+    //   - Riot account link: PK=username, SK=riotId ("gameName#tagLine") → puuid, summonerId, champWinRates, champWinRatesCachedAt
+    //   - User profile:      PK=username, SK="#profile"                  → champPool, preferredRole, displayName
+    this.userDataTable = new TableV2(this, "TeamCompDiffUserDataTable", {
+      partitionKey: { name: "username", type: AttributeType.STRING },
+      sortKey: { name: "riotId", type: AttributeType.STRING },
+      contributorInsights: true,
+      tableClass: TableClass.STANDARD,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      deletionProtection: true,
+    });
+
+    // Allows the algorithm to look up cached win rate data for any Riot ID (friend lookups)
+    this.userDataTable.addGlobalSecondaryIndex({
+      indexName: "riotId-index",
+      partitionKey: { name: "riotId", type: AttributeType.STRING },
+    });
+
+    // Saved algorithm inputs — users can re-run or modify these later
+    this.queriesTable = new TableV2(this, "TeamCompQueriesTable", {
+      partitionKey: { name: "username", type: AttributeType.STRING },
+      sortKey: { name: "queryId", type: AttributeType.STRING },
+      contributorInsights: true,
+      tableClass: TableClass.STANDARD,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      deletionProtection: true,
+    });
+
+    // Specific generated team comps the user has chosen to save
+    this.savedCompsTable = new TableV2(this, "TeamCompSavedCompsTable", {
+      partitionKey: { name: "username", type: AttributeType.STRING },
+      sortKey: { name: "compId", type: AttributeType.STRING },
+      contributorInsights: true,
+      tableClass: TableClass.STANDARD,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      deletionProtection: true,
     });
   }
 }
