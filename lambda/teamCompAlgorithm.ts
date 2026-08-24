@@ -637,9 +637,18 @@ async function buildComp(
   const suggestedPlaystyle = computePlaystyle(arch);
   const detectedArchetype = detectArchetype(picks);
 
-  const topPickScores = slots.map((s) => s.suggestions[0]?.score ?? 0);
-  const avgPickScore = topPickScores.length ? topPickScores.reduce((a, b) => a + b, 0) / topPickScores.length : 0;
-  const overallScore = Math.round((avgPickScore * 0.5 + synergies.overall * 0.5) * 10);
+  // Archetype coherence: how cleanly the top picks execute the comp's strategy (0–10)
+  const topPickNames = slots.map((s) => s.suggestions[0]?.champion).filter(Boolean) as string[];
+  const archetypeCoherence = topPickNames.length
+    ? (topPickNames.reduce((sum, c) => sum + (ALL_CHAMPIONS[c] ? archetypeFit(ALL_CHAMPIONS[c], arch) : 0), 0) /
+        topPickNames.length /
+        3) *
+      10
+    : 0;
+  // Synergy 60% + archetype coherence 40% — both always computable without personal data.
+  // Personal data (mastery + win rate) influences which champions get selected, which naturally
+  // pushes synergy and coherence higher for players who perform better on those champions.
+  const overallScore = Math.round(synergies.overall * 6 + archetypeCoherence * 4);
 
   const { description, winConditions } = await generateNarrative(detectedArchetype, picks, {
     difficulty,
