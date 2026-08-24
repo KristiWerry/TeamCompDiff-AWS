@@ -42,6 +42,7 @@ async function getProfile(event: APIGatewayProxyEvent): Promise<APIGatewayProxyR
     preferredRole: item?.preferredRole ?? null,
     preferredSecondaryRole: item?.preferredSecondaryRole ?? null,
     displayName: item?.displayName ?? null,
+    theme: item?.theme ?? null,
   });
 }
 
@@ -55,7 +56,7 @@ async function updateProfile(event: APIGatewayProxyEvent): Promise<APIGatewayPro
     return err(400, "Invalid JSON body");
   }
 
-  const { champPool, preferredRole, preferredSecondaryRole, displayName } = body;
+  const { champPool, preferredRole, preferredSecondaryRole, displayName, theme } = body;
 
   if (champPool !== undefined) {
     if (!Array.isArray(champPool) || champPool.some((c: unknown) => typeof c !== "string")) {
@@ -94,6 +95,7 @@ async function updateProfile(event: APIGatewayProxyEvent): Promise<APIGatewayPro
     ...(preferredRole !== undefined && { preferredRole }),
     ...(preferredSecondaryRole !== undefined && { preferredSecondaryRole }),
     ...(displayName !== undefined && { displayName }),
+    ...(theme !== undefined && { theme }),
   };
 
   await dynamo.send(new PutCommand({ TableName: TABLE_NAME, Item: updated }));
@@ -103,6 +105,7 @@ async function updateProfile(event: APIGatewayProxyEvent): Promise<APIGatewayPro
     preferredRole: updated.preferredRole ?? null,
     preferredSecondaryRole: updated.preferredSecondaryRole ?? null,
     displayName: updated.displayName ?? null,
+    theme: updated.theme ?? null,
   });
 }
 

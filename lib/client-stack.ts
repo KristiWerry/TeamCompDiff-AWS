@@ -16,6 +16,7 @@ export class ClientTeamCompDiffStack extends cdk.Stack {
     if (stageName === "dev") {
       const amplifyApp = new App(this, `TeamCompDiff`, {
         platform: Platform.WEB_COMPUTE,
+        customRules: [],
         environmentVariables: {
           NEXT_PUBLIC_API_BASE_URL: props.apiUrl ?? "",
           NEXT_PUBLIC_COGNITO_USER_POOL_ID: props.userpoolId ?? "",
@@ -35,6 +36,7 @@ export class ClientTeamCompDiffStack extends cdk.Stack {
       //TODO add hosted zone when url purchased
       const amplifyApp = new App(this, `TeamCompDiff`, {
         platform: Platform.WEB_COMPUTE,
+        customRules: [],
         environmentVariables: {
           NEXT_PUBLIC_API_BASE_URL: props.apiUrl ?? "",
           NEXT_PUBLIC_COGNITO_USER_POOL_ID: props.userpoolId ?? "",

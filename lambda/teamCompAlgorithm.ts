@@ -160,18 +160,48 @@ async function fetchPlayerCache(riotId: string): Promise<PlayerCache> {
 
 // ─── Stage 1: Role assignment ─────────────────────────────────────────────────
 
-function assignRoles(players: PlayerInput[]): Partial<Record<UserRole, PlayerInput>> {
+function assignRoles(
+  players: PlayerInput[],
+  playerCacheMap: Map<string, PlayerCache>
+): Partial<Record<UserRole, PlayerInput>> {
   const candidates: { pi: number; role: UserRole; score: number }[] = [];
 
   for (let pi = 0; pi < players.length; pi++) {
     const p = players[pi];
+    const cache = p.riotId ? (playerCacheMap.get(p.riotId) ?? null) : null;
+
     for (const role of USER_ROLES) {
-      let score = 0;
-      if (p.primaryRole === role) score += 3;
-      else if (p.secondaryRole === "fill")
-        score += 1; // fill secondary = willing to play any non-primary role
-      else if (p.secondaryRole === role) score += 1;
-      if (!p.champPool.some((c) => champCanPlayRole(c, role))) score -= 10;
+      const isPrimary = p.primaryRole === role || p.primaryRole === "fill";
+      const isSecondary = p.secondaryRole === role || p.secondaryRole === "fill";
+
+      // Hard constraint: only consider roles the player opted into
+      if (!isPrimary && !isSecondary) continue;
+
+      // Must have at least one champion eligible for this role
+      const eligible = p.champPool.filter((c) => champCanPlayRole(c, role));
+      if (eligible.length === 0) continue;
+
+      // Small preference bonus — primary slightly favored over secondary
+      let score = isPrimary ? 2 : 1;
+
+      // Champion quality for this role drives assignment
+      // Use best win rate + mastery among eligible champions
+      let bestChampScore = 0;
+      for (const champName of eligible) {
+        let champScore = 0;
+        const wr = cache?.winRates?.[champName];
+        if (wr && wr.games >= 10) {
+          const pct = wr.wins / wr.games;
+          champScore += pct >= 0.60 ? 3 : pct >= 0.55 ? 2 : pct >= 0.45 ? 1 : 0;
+        }
+        const m = cache?.mastery?.[champName];
+        if (m && m.level > 0) {
+          champScore += m.level >= 7 ? 2 : m.level >= 5 ? 1.5 : m.level >= 3 ? 1 : 0.5;
+        }
+        bestChampScore = Math.max(bestChampScore, champScore);
+      }
+      score += bestChampScore;
+
       candidates.push({ pi, role, score });
     }
   }
@@ -299,18 +329,19 @@ function selectChampions(
     let winRateStr: string | null = null;
     let masteryLevel: number | null = null;
 
-    // Win rate (up to 3 pts) — ignored if fewer than 5 games
+    // Win rate (up to 3 pts) — tiered, requires 10+ games for a reliable sample
     const wr = cache?.winRates?.[champName];
-    if (wr && wr.games >= 5) {
-      score += (wr.wins / wr.games) * 3;
-      winRateStr = `${Math.round((wr.wins / wr.games) * 100)}% (${wr.games} games)`;
+    if (wr && wr.games >= 10) {
+      const pct = wr.wins / wr.games;
+      score += pct >= 0.60 ? 3 : pct >= 0.55 ? 2 : pct >= 0.45 ? 1 : 0;
+      winRateStr = `${Math.round(pct * 100)}% (${wr.games} games)`;
     }
 
-    // Mastery (up to 2 pts) — level 7 = full 2pts; comfort matters especially in lower elo
+    // Mastery (up to 2 pts) — tiered by level bracket
     const m = cache?.mastery?.[champName];
     if (m && m.level > 0) {
       masteryLevel = m.level;
-      score += (m.level / 7) * 2;
+      score += m.level >= 7 ? 2 : m.level >= 5 ? 1.5 : m.level >= 3 ? 1 : 0.5;
     }
 
     // Synergy with already-picked champions (up to 4 pts total)
@@ -723,7 +754,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   players.forEach((p, i) => playerNumbers.set(p, i + 1));
 
   // Stage 1: Assign roles
-  const roleAssignment = assignRoles(players);
+  const roleAssignment = assignRoles(players, playerCacheMap);
 
   // Score archetype viability, always include top 5 sorted by fit, ensure minimum 3
   const ranked = ALL_ARCHETYPES.map((arch) => ({ arch, viability: archetypeViability(roleAssignment, arch) })).sort(
