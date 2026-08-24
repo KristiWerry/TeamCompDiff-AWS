@@ -80,6 +80,7 @@ interface SynergyPair {
 
 interface TeamComp {
   archetype: string;
+  overallScore: number;
   description: string;
   roleAssignment: Partial<Record<UserRole, string>>;
   picks: PickSlot[];
@@ -636,6 +637,10 @@ async function buildComp(
   const suggestedPlaystyle = computePlaystyle(arch);
   const detectedArchetype = detectArchetype(picks);
 
+  const topPickScores = slots.map((s) => s.suggestions[0]?.score ?? 0);
+  const avgPickScore = topPickScores.length ? topPickScores.reduce((a, b) => a + b, 0) / topPickScores.length : 0;
+  const overallScore = Math.round((avgPickScore * 0.5 + synergies.overall * 0.5) * 10);
+
   const { description, winConditions } = await generateNarrative(detectedArchetype, picks, {
     difficulty,
     powerSpike,
@@ -658,6 +663,7 @@ async function buildComp(
 
   return {
     archetype: detectedArchetype,
+    overallScore,
     description,
     roleAssignment: roleAssignmentOut,
     picks: slots,
