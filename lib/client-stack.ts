@@ -16,9 +16,9 @@ export class ClientTeamCompDiffStack extends cdk.Stack {
     if (stageName === "dev") {
       const amplifyApp = new App(this, `TeamCompDiff`, {
         environmentVariables: {
-          PUBLIC_API_BASE_URL: props.apiUrl ?? "",
-          PUBLIC_COGNITO_USER_POOL_ID: props.userpoolId ?? "",
-          PUBLIC_COGNITO_USER_POOL_CLIENT_ID: props.userpoolClientId ?? "",
+          NEXT_PUBLIC_API_BASE_URL: props.apiUrl ?? "",
+          NEXT_PUBLIC_COGNITO_USER_POOL_ID: props.userpoolId ?? "",
+          NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID: props.userpoolClientId ?? "",
         },
         sourceCodeProvider: new GitHubSourceCodeProvider({
           owner: "KristiWerry",

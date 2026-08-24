@@ -25,7 +25,7 @@ const CHAMP_ROLE: Record<UserRole, string> = {
 
 interface PlayerInput {
   primaryRole: InputRole;
-  secondaryRole?: UserRole;
+  secondaryRole?: InputRole;
   champPool: string[];
   riotId?: string;
 }
@@ -33,6 +33,7 @@ interface PlayerInput {
 interface ChampionData {
   id: string;
   info: { attack: number; defense: number; magic: number; difficulty: number };
+  tags?: string[];
   roles?: string[];
   damagePattern?: string;
   range?: string;
@@ -46,6 +47,10 @@ interface ChampionData {
   functionTags?: string[];
   waveClear?: { early: string; late: string };
   synergies?: string[];
+  grantsSpeedBoost?: boolean;
+  createsTerrain?: boolean;
+  usesTerrain?: boolean;
+  grantsInvincibility?: boolean;
 }
 
 interface PlayerCache {
@@ -92,7 +97,9 @@ interface TeamComp {
 // ─── Champion data (bundled at deploy time) ───────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const ALL_CHAMPIONS: Record<string, ChampionData> = (require("../data/champions.json") as { data: Record<string, ChampionData> }).data;
+const ALL_CHAMPIONS: Record<string, ChampionData> = (
+  require("../data/champions.json") as { data: Record<string, ChampionData> }
+).data;
 
 // ─── AWS clients ──────────────────────────────────────────────────────────────
 
@@ -118,7 +125,7 @@ function champCanPlayRole(champName: string, role: UserRole): boolean {
   const roles = ALL_CHAMPIONS[champName]?.roles;
   if (!roles) return false;
   const target = CHAMP_ROLE[role];
-  return roles.some(r => r?.toLowerCase() === target);
+  return roles.some((r) => r?.toLowerCase() === target);
 }
 
 function levelToNumber(level: string | undefined): number {
@@ -161,8 +168,10 @@ function assignRoles(players: PlayerInput[]): Partial<Record<UserRole, PlayerInp
     for (const role of USER_ROLES) {
       let score = 0;
       if (p.primaryRole === role) score += 3;
+      else if (p.secondaryRole === "fill")
+        score += 1; // fill secondary = willing to play any non-primary role
       else if (p.secondaryRole === role) score += 1;
-      if (!p.champPool.some(c => champCanPlayRole(c, role))) score -= 10;
+      if (!p.champPool.some((c) => champCanPlayRole(c, role))) score -= 10;
       candidates.push({ pi, role, score });
     }
   }
@@ -194,49 +203,49 @@ function archetypeFit(champ: ChampionData, arch: Archetype): number {
     case "Teamfight":
       return Math.min(
         (ft.includes("teamfight") || ft.includes("engage") ? 1.5 : 0) +
-        (["initiator", "frontline", "hyper-carry"].includes(tfr) ? 1 : 0) +
-        (champ.powerSpike === "late" ? 0.5 : 0) +
-        (champ.cc.some(c => c.hard && c.multi) ? 0.5 : 0),
+          (["initiator", "frontline", "hyper-carry"].includes(tfr) ? 1 : 0) +
+          (champ.powerSpike === "late" ? 0.5 : 0) +
+          (champ.cc.some((c) => c.hard && c.multi) ? 0.5 : 0),
         3
       );
     case "Poke":
       return Math.min(
         (ft.includes("poke") ? 2 : 0) +
-        (champ.range === "ranged" ? 0.5 : 0) +
-        (champ.damagePattern === "burst" ? 0.3 : 0),
+          (champ.range === "ranged" ? 0.5 : 0) +
+          (champ.damagePattern === "burst" ? 0.3 : 0),
         3
       );
     case "Pick":
       return Math.min(
         (ft.includes("pick") || ft.includes("assassin") ? 2 : 0) +
-        (["dash", "blink"].includes(champ.mobility ?? "") ? 0.5 : 0) +
-        (["assassin", "pick-support"].includes(tfr) ? 0.5 : 0),
+          (["dash", "blink"].includes(champ.mobility ?? "") ? 0.5 : 0) +
+          (["assassin", "pick-support"].includes(tfr) ? 0.5 : 0),
         3
       );
     case "SplitPush": {
       const mobility = champ.mobility ?? "none";
       const globalPresence = champ.globalPresence ?? "none";
       // Sidelane effectiveness: needs to push waves, win 1v1s, escape ganks, and optionally rejoin
-      const mobilityScore = ["dash", "blink", "terrain-crossing"].includes(mobility) ? 0.5
-        : ["speed-boost", "stealth"].includes(mobility) ? 0.25
-        : 0;
-      const globalScore = globalPresence === "high" ? 0.5
-        : ["medium", "variable"].includes(globalPresence) ? 0.25
-        : 0;
+      const mobilityScore = ["dash", "blink", "terrain-crossing"].includes(mobility)
+        ? 0.5
+        : ["speed-boost", "stealth"].includes(mobility)
+          ? 0.25
+          : 0;
+      const globalScore = globalPresence === "high" ? 0.5 : ["medium", "variable"].includes(globalPresence) ? 0.25 : 0;
       return Math.min(
         (ft.includes("split-push") ? 1.5 : 0) +
-        (champ.duelingCapability ? 0.5 : 0) +
-        (levelToNumber(champ.waveClear?.late) >= 2 ? 0.5 : 0) +
-        mobilityScore +
-        globalScore,
+          (champ.duelingCapability ? 0.5 : 0) +
+          (levelToNumber(champ.waveClear?.late) >= 2 ? 0.5 : 0) +
+          mobilityScore +
+          globalScore,
         3
       );
     }
     case "EarlyGame":
       return Math.min(
         (champ.powerSpike === "early" ? 2 : 0) +
-        (ft.includes("snowball") || ft.includes("skirmisher") ? 0.5 : 0) +
-        (champ.duelingCapability ? 0.5 : 0),
+          (ft.includes("snowball") || ft.includes("skirmisher") ? 0.5 : 0) +
+          (champ.duelingCapability ? 0.5 : 0),
         3
       );
   }
@@ -253,11 +262,13 @@ function impactNote(
   const ft = c.functionTags ?? [];
 
   if (rank === 0) {
-    if (arch === "Teamfight" && (ft.includes("engage") || c.cc.some(x => x.hard && x.multi))) return "Core engage piece — anchors teamfight identity";
+    if (arch === "Teamfight" && (ft.includes("engage") || c.cc.some((x) => x.hard && x.multi)))
+      return "Core engage piece — anchors teamfight identity";
     if (arch === "Poke" && ft.includes("poke")) return "Primary poke source — enables siege playstyle";
     if (arch === "SplitPush" && ft.includes("split-push")) return "Split push threat — creates constant map pressure";
     if (arch === "EarlyGame" && c.powerSpike === "early") return "Early power spike — sets the pace of the game";
-    if (arch === "Pick" && (ft.includes("pick") || ft.includes("assassin"))) return "Pick threat — creates fog-of-war pressure";
+    if (arch === "Pick" && (ft.includes("pick") || ft.includes("assassin")))
+      return "Pick threat — creates fog-of-war pressure";
     return "Best fit for this comp's identity";
   }
 
@@ -277,12 +288,12 @@ function selectChampions(
   cache: PlayerCache | null
 ): { slot: PickSlot; topPick: string | null } {
   const pool = player
-    ? (player.champPool.filter(c => champCanPlayRole(c, role)).length > 0
-        ? player.champPool.filter(c => champCanPlayRole(c, role))
-        : player.champPool)
-    : Object.keys(ALL_CHAMPIONS).filter(c => champCanPlayRole(c, role));
+    ? player.champPool.filter((c) => champCanPlayRole(c, role)).length > 0
+      ? player.champPool.filter((c) => champCanPlayRole(c, role))
+      : player.champPool
+    : Object.keys(ALL_CHAMPIONS).filter((c) => champCanPlayRole(c, role));
 
-  const scored = pool.map(champName => {
+  const scored = pool.map((champName) => {
     const champ = ALL_CHAMPIONS[champName];
     let score = 0;
     let winRateStr: string | null = null;
@@ -302,15 +313,15 @@ function selectChampions(
       score += (m.level / 7) * 2;
     }
 
-    // Synergy with already-picked champions (up to 2 pts)
+    // Synergy with already-picked champions (up to 4 pts total)
+    // Each pair: pairSynergyScore 0–10, scaled to 0–1 per pair
     for (const picked of Object.values(picks)) {
-      if (!picked || !champ) continue;
-      if (champ.synergies?.includes(picked)) score += 0.5;
-      if (ALL_CHAMPIONS[picked]?.synergies?.includes(champName)) score += 0.5;
+      if (!picked) continue;
+      score += Math.min(pairSynergyScore(champName, picked) * 0.1, 1.0);
     }
 
-    // Archetype fit (up to 3 pts)
-    if (champ) score += archetypeFit(champ, arch);
+    // Archetype hint (up to 1 pt) — light steering for diversity between comps
+    if (champ) score += archetypeFit(champ, arch) / 3;
 
     return { champName, score: Math.round(score * 10) / 10, winRateStr, masteryLevel };
   });
@@ -322,7 +333,7 @@ function selectChampions(
   return {
     slot: {
       role,
-      player: player ? player.riotId ?? "Player" : null,
+      player: player ? (player.riotId ?? "Player") : null,
       suggestions: top3.map((s, i) => ({
         champion: s.champName,
         score: s.score,
@@ -336,6 +347,71 @@ function selectChampions(
 }
 
 // ─── Synergy model (all 10 role pairs, weighted) ──────────────────────────────
+// Based on this article:https://mobalytics.gg/blog/understanding-champion-synergy-league-legends-guide/
+// Kit-based synergy: scores champion pairs based on complementary roles/abilities.
+// Returns 0–5, combined with the explicit synergy list (0–5) to form a 0–10 pair score.
+function computeKitSynergy(champA: ChampionData, champB: ChampionData): number {
+  let score = 0;
+  const ftA = champA.functionTags ?? [];
+  const ftB = champB.functionTags ?? [];
+  const tagsA = champA.tags ?? [];
+  const tagsB = champB.tags ?? [];
+
+  // Initiation + follow-up: engage sets up follow-up CC that would be hard to land solo
+  const engageA = ftA.includes("engage") || champA.teamfightRole === "initiator";
+  const engageB = ftB.includes("engage") || champB.teamfightRole === "initiator";
+  if ((engageA && ftB.includes("follow-up")) || (engageB && ftA.includes("follow-up"))) score += 2;
+
+  // Package + delivery: delivery champ carries a high-impact AoE ult into perfect position
+  if ((ftA.includes("package") && ftB.includes("delivery")) || (ftB.includes("package") && ftA.includes("delivery")))
+    score += 3;
+
+  // Immobile champion + speed boost granter: unlocks immobile juggernauts
+  const noMobA = !champA.mobility || champA.mobility === "none";
+  const noMobB = !champB.mobility || champB.mobility === "none";
+  if (noMobA && champB.grantsSpeedBoost) score += 1.5;
+  if (noMobB && champA.grantsSpeedBoost) score += 1.5;
+
+  // Terrain creator + terrain utilizer: walls make skillshots and AoE easier to land
+  if (champA.createsTerrain && champB.usesTerrain) score += 1.5;
+  if (champB.createsTerrain && champA.usesTerrain) score += 1.5;
+
+  // Invincibility granter + fragile high-damage carry
+  const fragileA = tagsA.some((t) => ["Marksman", "Assassin", "Mage"].includes(t)) && noMobA;
+  const fragileB = tagsB.some((t) => ["Marksman", "Assassin", "Mage"].includes(t)) && noMobB;
+  if (champA.grantsInvincibility && fragileB) score += 2;
+  if (champB.grantsInvincibility && fragileA) score += 2;
+
+  // Peeler/protector + fragile carry: squishy + protector pattern
+  const peelerA = champA.teamfightRole === "peeler" || ftA.includes("peel");
+  const peelerB = champB.teamfightRole === "peeler" || ftB.includes("peel");
+  if (peelerA && fragileB) score += 1.5;
+  if (peelerB && fragileA) score += 1.5;
+
+  // High CC + high damage: lockdown enables burst damage
+  const hardCCA = champA.cc?.filter((c) => c.hard).length ?? 0;
+  const hardCCB = champB.cc?.filter((c) => c.hard).length ?? 0;
+  const highDmgA = champA.damagePattern === "burst" || tagsA.some((t) => ["Assassin", "Mage"].includes(t));
+  const highDmgB = champB.damagePattern === "burst" || tagsB.some((t) => ["Assassin", "Mage"].includes(t));
+  if (hardCCA >= 2 && highDmgB) score += 1;
+  if (hardCCB >= 2 && highDmgA) score += 1;
+
+  return Math.min(score, 5);
+}
+
+// Combined pair score 0–10: explicit synergy list (0–5) + kit synergy (0–5)
+function pairSynergyScore(cA: string, cB: string): number {
+  const champA = ALL_CHAMPIONS[cA];
+  const champB = ALL_CHAMPIONS[cB];
+  if (!champA || !champB) return 0;
+
+  let score = 0;
+  if (champA.synergies?.includes(cB)) score += 2.5;
+  if (champB.synergies?.includes(cA)) score += 2.5;
+  score += computeKitSynergy(champA, champB);
+
+  return Math.min(Math.round(score * 10) / 10, 10);
+}
 
 const PAIR_WEIGHTS: Record<string, number> = {
   "adc-support": 1.5,
@@ -344,19 +420,18 @@ const PAIR_WEIGHTS: Record<string, number> = {
 };
 
 function scoreSynergies(picks: Partial<Record<UserRole, string>>): { overall: number; pairs: SynergyPair[] } {
-  const filled = USER_ROLES.filter(r => picks[r]) as UserRole[];
+  const filled = USER_ROLES.filter((r) => picks[r]) as UserRole[];
   const pairs: SynergyPair[] = [];
   let weightedSum = 0;
   let totalWeight = 0;
 
   for (let i = 0; i < filled.length; i++) {
     for (let j = i + 1; j < filled.length; j++) {
-      const rA = filled[i], rB = filled[j];
-      const cA = picks[rA]!, cB = picks[rB]!;
-      let raw = 0;
-      if (ALL_CHAMPIONS[cA]?.synergies?.includes(cB)) raw += 1;
-      if (ALL_CHAMPIONS[cB]?.synergies?.includes(cA)) raw += 1;
-      const score = raw * 5;
+      const rA = filled[i],
+        rB = filled[j];
+      const cA = picks[rA]!,
+        cB = picks[rB]!;
+      const score = pairSynergyScore(cA, cB);
 
       const key = [rA, rB].sort().join("-");
       const weight = PAIR_WEIGHTS[key] ?? 1.0;
@@ -373,7 +448,9 @@ function scoreSynergies(picks: Partial<Record<UserRole, string>>): { overall: nu
 // ─── Analysis helpers ─────────────────────────────────────────────────────────
 
 function computeDifficulty(picks: Partial<Record<UserRole, string>>): number {
-  const vals = Object.values(picks).filter(Boolean).map(c => ALL_CHAMPIONS[c!]?.info.difficulty ?? 5);
+  const vals = Object.values(picks)
+    .filter(Boolean)
+    .map((c) => ALL_CHAMPIONS[c!]?.info.difficulty ?? 5);
   return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 5;
 }
 
@@ -393,7 +470,7 @@ function computePowerSpike(picks: Partial<Record<UserRole, string>>): PowerSpike
 function computeEngage(picks: Partial<Record<UserRole, string>>): string {
   const hardCC = Object.values(picks)
     .filter(Boolean)
-    .reduce((sum, c) => sum + (ALL_CHAMPIONS[c!]?.cc.filter(x => x.hard).length ?? 0), 0);
+    .reduce((sum, c) => sum + (ALL_CHAMPIONS[c!]?.cc.filter((x) => x.hard).length ?? 0), 0);
   if (hardCC >= 4) return "Very High";
   if (hardCC >= 2) return "High";
   if (hardCC === 1) return "Medium";
@@ -406,7 +483,8 @@ function computePlaystyle(arch: Archetype): string {
     Poke: "Apply poke pressure from range, siege objectives, force fights at a health deficit",
     Pick: "Look for pick opportunities in the fog of war, convert gold leads into objectives",
     SplitPush: "Apply split-push pressure, force the enemy to respond 1v1 or concede objectives",
-    EarlyGame: "Establish early leads through aggressive skirmishing and convert into objectives before the enemy scales",
+    EarlyGame:
+      "Establish early leads through aggressive skirmishing and convert into objectives before the enemy scales",
   };
   return styles[arch];
 }
@@ -418,7 +496,9 @@ async function generateNarrative(
   picks: Partial<Record<UserRole, string>>,
   analysis: { difficulty: number; powerSpike: PowerSpike | "mixed"; synergies: { overall: number }; engage: string }
 ): Promise<{ description: string; winConditions: string[] }> {
-  const picksStr = Object.entries(picks).map(([r, c]) => `${r}: ${c}`).join(", ");
+  const picksStr = Object.entries(picks)
+    .map(([r, c]) => `${r}: ${c}`)
+    .join(", ");
 
   const prompt = `You are a League of Legends coach. Given the following team comp data, write a brief analysis.
 
@@ -451,7 +531,11 @@ Respond with valid JSON only (no markdown, no code blocks):
   } catch {
     return {
       description: `A ${arch.toLowerCase()} team composition.`,
-      winConditions: ["Execute your primary strategy", "Control vision around objectives", "Translate your advantage to a win"],
+      winConditions: [
+        "Execute your primary strategy",
+        "Control vision around objectives",
+        "Translate your advantage to a win",
+      ],
     };
   }
 }
@@ -473,12 +557,24 @@ function archetypeViability(roleAssignment: Partial<Record<UserRole, PlayerInput
   const scores: number[] = [];
   for (const [role, player] of Object.entries(roleAssignment) as [UserRole, PlayerInput][]) {
     if (!player) continue;
-    const eligible = player.champPool.filter(c => champCanPlayRole(c, role));
+    const eligible = player.champPool.filter((c) => champCanPlayRole(c, role));
     const pool = eligible.length > 0 ? eligible : player.champPool;
-    const best = Math.max(...pool.map(c => ALL_CHAMPIONS[c] ? archetypeFit(ALL_CHAMPIONS[c], arch) : 0));
+    const best = Math.max(...pool.map((c) => (ALL_CHAMPIONS[c] ? archetypeFit(ALL_CHAMPIONS[c], arch) : 0)));
     scores.push(best);
   }
   return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+}
+
+// Detect what archetype the final picks most resemble — used as the output label
+function detectArchetype(picks: Partial<Record<UserRole, string>>): string {
+  const champNames = Object.values(picks).filter(Boolean) as string[];
+  let bestArch: Archetype = "Teamfight";
+  let bestScore = -1;
+  for (const arch of ALL_ARCHETYPES) {
+    const score = champNames.reduce((sum, c) => sum + (ALL_CHAMPIONS[c] ? archetypeFit(ALL_CHAMPIONS[c], arch) : 0), 0);
+    if (score > bestScore) { bestScore = score; bestArch = arch; }
+  }
+  return ARCHETYPE_LABELS[bestArch];
 }
 
 async function buildComp(
@@ -507,10 +603,14 @@ async function buildComp(
   const powerSpike = computePowerSpike(picks);
   const engage = computeEngage(picks);
   const suggestedPlaystyle = computePlaystyle(arch);
+  const detectedArchetype = detectArchetype(picks);
 
-  const { description, winConditions } = await generateNarrative(
-    ARCHETYPE_LABELS[arch], picks, { difficulty, powerSpike, synergies, engage }
-  );
+  const { description, winConditions } = await generateNarrative(detectedArchetype, picks, {
+    difficulty,
+    powerSpike,
+    synergies,
+    engage,
+  });
 
   const roleAssignmentOut: Partial<Record<UserRole, string>> = {};
   for (const role of USER_ROLES) {
@@ -526,7 +626,7 @@ async function buildComp(
   }
 
   return {
-    archetype: ARCHETYPE_LABELS[arch],
+    archetype: detectedArchetype,
     description,
     roleAssignment: roleAssignmentOut,
     picks: slots,
@@ -543,8 +643,16 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
-const ok = (body: object): APIGatewayProxyResult => ({ statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify(body) });
-const err = (code: number, message: string): APIGatewayProxyResult => ({ statusCode: code, headers: CORS_HEADERS, body: JSON.stringify({ message }) });
+const ok = (body: object): APIGatewayProxyResult => ({
+  statusCode: 200,
+  headers: CORS_HEADERS,
+  body: JSON.stringify(body),
+});
+const err = (code: number, message: string): APIGatewayProxyResult => ({
+  statusCode: code,
+  headers: CORS_HEADERS,
+  body: JSON.stringify({ message }),
+});
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   let body: { players?: unknown };
@@ -567,13 +675,18 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (!p.primaryRole || !INPUT_ROLES.includes(p.primaryRole)) {
       return err(400, `primaryRole must be one of: ${INPUT_ROLES.join(", ")}`);
     }
-    if (p.primaryRole === "fill" && p.secondaryRole) {
-      return err(400, "secondaryRole cannot be set when primaryRole is fill");
+    if (p.secondaryRole && !INPUT_ROLES.includes(p.secondaryRole)) {
+      return err(400, `secondaryRole must be one of: ${INPUT_ROLES.join(", ")}`);
     }
-    if (p.secondaryRole && !USER_ROLES.includes(p.secondaryRole)) {
-      return err(400, `secondaryRole must be one of: ${USER_ROLES.join(", ")}`);
+    if (p.primaryRole === "fill" && p.secondaryRole === "fill") {
+      return err(400, 'primaryRole and secondaryRole cannot both be "fill"');
     }
-    if (p.secondaryRole && p.secondaryRole === p.primaryRole) {
+    if (
+      p.secondaryRole &&
+      p.secondaryRole !== "fill" &&
+      p.primaryRole !== "fill" &&
+      p.secondaryRole === p.primaryRole
+    ) {
       return err(400, "primaryRole and secondaryRole must be different");
     }
 
@@ -598,8 +711,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const playerCacheMap = new Map<string, PlayerCache>();
   await Promise.all(
     players
-      .filter(p => p.riotId)
-      .map(async p => {
+      .filter((p) => p.riotId)
+      .map(async (p) => {
         const cache = await fetchPlayerCache(p.riotId!);
         playerCacheMap.set(p.riotId!, cache);
       })
@@ -613,17 +726,17 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const roleAssignment = assignRoles(players);
 
   // Score archetype viability, always include top 5 sorted by fit, ensure minimum 3
-  const ranked = ALL_ARCHETYPES
-    .map(arch => ({ arch, viability: archetypeViability(roleAssignment, arch) }))
-    .sort((a, b) => b.viability - a.viability);
+  const ranked = ALL_ARCHETYPES.map((arch) => ({ arch, viability: archetypeViability(roleAssignment, arch) })).sort(
+    (a, b) => b.viability - a.viability
+  );
 
-  const viable = ranked.filter(a => a.viability >= VIABILITY_THRESHOLD);
+  const viable = ranked.filter((a) => a.viability >= VIABILITY_THRESHOLD);
   const selected = viable.length >= 3 ? viable : ranked.slice(0, 3);
-  const finalArchetypes = selected.slice(0, 5).map(a => a.arch);
+  const finalArchetypes = selected.slice(0, 5).map((a) => a.arch);
 
   // Stage 3: Generate all comps in parallel (LLM calls run concurrently)
   const comps = await Promise.all(
-    finalArchetypes.map(arch => buildComp(arch, roleAssignment, playerNumbers, playerCacheMap))
+    finalArchetypes.map((arch) => buildComp(arch, roleAssignment, playerNumbers, playerCacheMap))
   );
 
   return ok({ comps });
