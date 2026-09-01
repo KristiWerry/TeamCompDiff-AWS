@@ -8,7 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 type UserRole = "top" | "jungle" | "mid" | "adc" | "support";
 type InputRole = UserRole | "fill";
-type Archetype = "Teamfight" | "Poke" | "Pick" | "SplitPush" | "EarlyGame";
+type Archetype = "Teamfight" | "Poke" | "Pick" | "SplitPush" | "ProtectTheCarry" | "Dive";
 type PowerSpike = "early" | "mid" | "late";
 
 const USER_ROLES: UserRole[] = ["top", "jungle", "mid", "adc", "support"];
@@ -38,7 +38,7 @@ interface ChampionData {
   damagePattern?: string;
   range?: string;
   powerSpike?: PowerSpike;
-  cc: Array<{ type: string; hard: boolean; duration: number; isUlt: boolean; multi: boolean }>;
+  cc: Array<{ type: string; hard: boolean; duration: number; isUlt: boolean; multi: boolean; isReliable?: "low" | "medium" | "high" }>;
   duelingCapability?: boolean;
   globalPresence?: string;
   mobility?: string;
@@ -58,12 +58,24 @@ interface PlayerCache {
   mastery: Record<string, { level: number; points: number }> | null;
 }
 
+interface ChampionStats {
+  damage: number;       // 0–10 (max of attack/magic ratings)
+  damageType: "physical" | "magic" | "mixed";
+  toughness: number;    // 0–10 (defense rating)
+  control: number;      // 0–10 (derived from cc array)
+  mobility: number;     // 0–10 (derived from mobility field)
+  utility: number;      // 0–10 (derived from sustain, globalPresence, functionTags, etc.)
+  difficulty: number;   // 0–10 (difficulty rating)
+  isRanged: boolean;
+}
+
 interface ChampionSuggestion {
   champion: string;
   score: number;
   winRate: string | null;
   masteryLevel: number | null;
   impactNote: string;
+  stats: ChampionStats;
 }
 
 interface PickSlot {
@@ -91,6 +103,10 @@ interface TeamComp {
     synergies: { overall: number; pairs: SynergyPair[] };
     suggestedPlaystyle: string;
     engage: string;
+    damageProfile: { physical: number; magic: number; mixed: number; balanced: boolean };
+    hasFrontline: boolean;
+    rangedCount: number;
+    teamStats: ChampionStats;
   };
   cacheAgesAt: Record<string, string>;
 }
@@ -163,7 +179,8 @@ async function fetchPlayerCache(riotId: string): Promise<PlayerCache> {
 
 function assignRoles(
   players: PlayerInput[],
-  playerCacheMap: Map<string, PlayerCache>
+  playerCacheMap: Map<string, PlayerCache>,
+  arch?: Archetype
 ): Partial<Record<UserRole, PlayerInput>> {
   const candidates: { pi: number; role: UserRole; score: number }[] = [];
 
@@ -202,6 +219,12 @@ function assignRoles(
         bestChampScore = Math.max(bestChampScore, champScore);
       }
       score += bestChampScore;
+
+      // Archetype fit: nudge assignment toward whoever best serves this comp's strategy
+      if (arch) {
+        const bestFit = Math.max(...eligible.map((c) => (ALL_CHAMPIONS[c] ? archetypeFit(ALL_CHAMPIONS[c], arch) / 3 : 0)));
+        score += bestFit * 0.75;
+      }
 
       candidates.push({ pi, role, score });
     }
@@ -272,10 +295,20 @@ function archetypeFit(champ: ChampionData, arch: Archetype): number {
         3
       );
     }
-    case "EarlyGame":
+    case "ProtectTheCarry":
       return Math.min(
-        (champ.powerSpike === "early" ? 2 : 0) +
-          (ft.includes("snowball") || ft.includes("skirmisher") ? 0.5 : 0) +
+        (tfr === "peeler" || ft.includes("peel") ? 2 : 0) +
+          (champ.grantsInvincibility ? 1 : 0) +
+          (champ.grantsSpeedBoost ? 0.5 : 0) +
+          (tfr === "hyper-carry" ? 1.5 : 0) +
+          (champ.sustain === "high" ? 0.5 : 0),
+        3
+      );
+    case "Dive":
+      return Math.min(
+        (ft.includes("assassin") || ft.includes("dive") ? 1.5 : 0) +
+          (["dash", "blink", "terrain-crossing"].includes(champ.mobility ?? "") ? 1 : 0) +
+          (champ.damagePattern === "burst" ? 0.5 : 0) +
           (champ.duelingCapability ? 0.5 : 0),
         3
       );
@@ -297,7 +330,12 @@ function impactNote(
       return "Core engage piece — anchors teamfight identity";
     if (arch === "Poke" && ft.includes("poke")) return "Primary poke source — enables siege playstyle";
     if (arch === "SplitPush" && ft.includes("split-push")) return "Split push threat — creates constant map pressure";
-    if (arch === "EarlyGame" && c.powerSpike === "early") return "Early power spike — sets the pace of the game";
+    if (arch === "ProtectTheCarry" && (c.teamfightRole === "peeler" || ft.includes("peel") || c.grantsInvincibility))
+      return "Core protector — keeps the hypercarry alive through every fight";
+    if (arch === "ProtectTheCarry" && c.teamfightRole === "hyper-carry")
+      return "Hypercarry — the player this entire comp is built around";
+    if (arch === "Dive" && (ft.includes("assassin") || ft.includes("dive")))
+      return "Dive threat — leads the coordinated backline assault";
     if (arch === "Pick" && (ft.includes("pick") || ft.includes("assassin")))
       return "Pick threat — creates fog-of-war pressure";
     return "Best fit for this comp's identity";
@@ -316,13 +354,19 @@ function selectChampions(
   player: PlayerInput | null,
   arch: Archetype,
   picks: Partial<Record<UserRole, string>>,
-  cache: PlayerCache | null
+  cache: PlayerCache | null,
+  usedChamps: Set<string>
 ): { slot: PickSlot; topPick: string | null } {
-  const pool = player
+  const rawPool = player
     ? player.champPool.filter((c) => champCanPlayRole(c, role)).length > 0
       ? player.champPool.filter((c) => champCanPlayRole(c, role))
       : player.champPool
     : Object.keys(ALL_CHAMPIONS).filter((c) => champCanPlayRole(c, role));
+
+  // Exclude champions already picked in this comp; fall back to full pool if it would leave nothing
+  const pool = rawPool.filter((c) => !usedChamps.has(c)).length > 0
+    ? rawPool.filter((c) => !usedChamps.has(c))
+    : rawPool;
 
   const scored = pool.map((champName) => {
     const champ = ALL_CHAMPIONS[champName];
@@ -372,6 +416,7 @@ function selectChampions(
         winRate: s.winRateStr,
         masteryLevel: s.masteryLevel,
         impactNote: impactNote(s.champName, arch, i, picks),
+        stats: getChampionStats(s.champName),
       })),
     },
     topPick,
@@ -500,23 +545,152 @@ function computePowerSpike(picks: Partial<Record<UserRole, string>>): PowerSpike
 }
 
 function computeEngage(picks: Partial<Record<UserRole, string>>): string {
-  const hardCC = Object.values(picks)
-    .filter(Boolean)
-    .reduce((sum, c) => sum + (ALL_CHAMPIONS[c!]?.cc.filter((x) => x.hard).length ?? 0), 0);
-  if (hardCC >= 4) return "Very High";
-  if (hardCC >= 2) return "High";
-  if (hardCC === 1) return "Medium";
+  // Quality-weighted CC score: each hard CC contributes based on reliability (0.6–1.2)
+  // so a team with 3 point-and-click stuns outrates one with 5 hard-to-land skillshots
+  let quality = 0;
+  for (const c of Object.values(picks)) {
+    if (!c) continue;
+    for (const cc of ALL_CHAMPIONS[c]?.cc ?? []) {
+      if (!cc.hard) continue;
+      quality += reliabilityMult(cc.isReliable);
+    }
+  }
+  if (quality >= 4.5) return "Very High";
+  if (quality >= 2.5) return "High";
+  if (quality >= 1.0) return "Medium";
   return "Low";
+}
+
+// Derived from info.attack vs info.magic ratings (Riot API) + tags.
+// Marksman always physical; pure Mage always magic; everything else by rating gap.
+function getDamageType(champ: ChampionData): "physical" | "magic" | "mixed" {
+  const { attack, magic } = champ.info;
+  const tags = champ.tags ?? [];
+  if (tags.includes("Marksman")) return "physical";
+  if (tags.includes("Mage") && !tags.includes("Fighter")) return "magic";
+  const diff = attack - magic;
+  if (diff >= 4) return "physical";
+  if (diff <= -4) return "magic";
+  return "mixed";
+}
+
+function computeDamageProfile(picks: Partial<Record<UserRole, string>>): {
+  physical: number; magic: number; mixed: number; balanced: boolean;
+} {
+  let physical = 0, magic = 0, mixed = 0;
+  for (const c of Object.values(picks)) {
+    if (!c || !ALL_CHAMPIONS[c]) continue;
+    const type = getDamageType(ALL_CHAMPIONS[c]);
+    if (type === "physical") physical++;
+    else if (type === "magic") magic++;
+    else mixed++;
+  }
+  // balanced = at least 2 effective sources of each type (mixed counts as both)
+  const balanced = (physical + mixed) >= 2 && (magic + mixed) >= 2;
+  return { physical, magic, mixed, balanced };
+}
+
+function computeHasFrontline(picks: Partial<Record<UserRole, string>>): boolean {
+  return Object.values(picks).some((c) => {
+    if (!c) return false;
+    const champ = ALL_CHAMPIONS[c];
+    if (!champ) return false;
+    return ["frontline", "initiator"].includes(champ.teamfightRole ?? "") || champ.tags?.includes("Tank") === true;
+  });
+}
+
+function computeRangedCount(picks: Partial<Record<UserRole, string>>): number {
+  return Object.values(picks).filter((c) => c && ALL_CHAMPIONS[c]?.range === "ranged").length;
+}
+
+function reliabilityMult(isReliable: "low" | "medium" | "high" | undefined): number {
+  if (isReliable === "high") return 1.2;
+  if (isReliable === "low") return 0.6;
+  return 1.0; // medium or missing
+}
+
+function computeControlScore(cc: ChampionData["cc"]): number {
+  let score = 0;
+  for (const c of cc) {
+    if (!c.hard) {
+      score += 0.2; // soft CC (slows, silences) barely moves the needle
+      continue;
+    }
+    let base = 2.0 * reliabilityMult(c.isReliable);
+    if (c.multi) base += 0.5;
+    if (c.duration >= 2) base += 0.5;
+    score += base;
+  }
+  return Math.min(Math.round(score * 10) / 10, 10);
+}
+
+function computeMobilityScore(mobility: string | undefined): number {
+  if (mobility === "blink") return 7;
+  if (mobility === "terrain-crossing") return 8;
+  if (mobility === "dash") return 6;
+  if (mobility === "stealth") return 5;
+  if (mobility === "speed-boost") return 3;
+  return 1;
+}
+
+function computeUtilityScore(champ: ChampionData): number {
+  const ft = champ.functionTags ?? [];
+  let score = 0;
+  if (champ.grantsInvincibility) score += 3;
+  if (champ.grantsSpeedBoost) score += 2;
+  if (champ.globalPresence === "high") score += 2;
+  else if (champ.globalPresence === "medium" || champ.globalPresence === "variable") score += 1;
+  if (champ.sustain === "high") score += 2;
+  else if (champ.sustain === "medium") score += 1;
+  if (ft.includes("peel")) score += 1;
+  if (champ.tags?.includes("Support")) score += 1;
+  return Math.min(Math.round(score * 10) / 10, 10);
+}
+
+function getChampionStats(champName: string): ChampionStats {
+  const champ = ALL_CHAMPIONS[champName];
+  if (!champ) return { damage: 0, damageType: "physical", toughness: 0, control: 0, mobility: 0, utility: 0, difficulty: 0, isRanged: false };
+  return {
+    damage: Math.max(champ.info.attack, champ.info.magic),
+    damageType: getDamageType(champ),
+    toughness: champ.info.defense,
+    control: computeControlScore(champ.cc),
+    mobility: computeMobilityScore(champ.mobility),
+    utility: computeUtilityScore(champ),
+    difficulty: champ.info.difficulty,
+    isRanged: champ.range === "ranged",
+  };
+}
+
+function computeTeamStats(picks: Partial<Record<UserRole, string>>, damageProfile: { physical: number; magic: number; mixed: number }): ChampionStats {
+  const names = Object.values(picks).filter(Boolean) as string[];
+  if (!names.length) return { damage: 0, damageType: "mixed", toughness: 0, control: 0, mobility: 0, utility: 0, difficulty: 0, isRanged: false };
+  const stats = names.map(getChampionStats);
+  const avg = (key: keyof Omit<ChampionStats, "damageType" | "isRanged">) =>
+    Math.round((stats.reduce((s, c) => s + (c[key] as number), 0) / stats.length) * 10) / 10;
+  const damageType: ChampionStats["damageType"] =
+    damageProfile.physical > damageProfile.magic + damageProfile.mixed ? "physical" :
+    damageProfile.magic > damageProfile.physical + damageProfile.mixed ? "magic" : "mixed";
+  return {
+    damage: avg("damage"),
+    damageType,
+    toughness: avg("toughness"),
+    control: avg("control"),
+    mobility: avg("mobility"),
+    utility: avg("utility"),
+    difficulty: avg("difficulty"),
+    isRanged: stats.filter((s) => s.isRanged).length > names.length / 2,
+  };
 }
 
 function computePlaystyle(arch: Archetype): string {
   const styles: Record<Archetype, string> = {
-    Teamfight: "Group for objectives and force teamfights when ahead",
+    Teamfight: "Group for objectives and force teamfights — look for the one big engage combo that ends the fight",
     Poke: "Apply poke pressure from range, siege objectives, force fights at a health deficit",
     Pick: "Look for pick opportunities in the fog of war, convert gold leads into objectives",
     SplitPush: "Apply split-push pressure, force the enemy to respond 1v1 or concede objectives",
-    EarlyGame:
-      "Establish early leads through aggressive skirmishing and convert into objectives before the enemy scales",
+    ProtectTheCarry: "Funnel resources into your hypercarry and keep them alive — their late-game damage wins the game",
+    Dive: "Coordinate multi-player dives onto the enemy backline — eliminate their carries before they can deal damage",
   };
   return styles[arch];
 }
@@ -579,11 +753,12 @@ const ARCHETYPE_LABELS: Record<Archetype, string> = {
   Poke: "Poke / Siege",
   Pick: "Pick Comp",
   SplitPush: "Split Push",
-  EarlyGame: "Early Game",
+  ProtectTheCarry: "Protect the Carry",
+  Dive: "Dive Comp",
 };
 
 const VIABILITY_THRESHOLD = 0.4;
-const ALL_ARCHETYPES: Archetype[] = ["Teamfight", "Poke", "Pick", "SplitPush", "EarlyGame"];
+const ALL_ARCHETYPES: Archetype[] = ["Teamfight", "Poke", "Pick", "SplitPush", "ProtectTheCarry", "Dive"];
 
 function archetypeViability(roleAssignment: Partial<Record<UserRole, PlayerInput>>, arch: Archetype): number {
   const scores: number[] = [];
@@ -611,23 +786,29 @@ function detectArchetype(picks: Partial<Record<UserRole, string>>): string {
 
 async function buildComp(
   arch: Archetype,
-  roleAssignment: Partial<Record<UserRole, PlayerInput>>,
+  players: PlayerInput[],
   playerNumbers: Map<PlayerInput, number>,
   playerCacheMap: Map<string, PlayerCache>
 ): Promise<TeamComp> {
+  // Role assignment is per-comp so archetype fit can nudge players into different roles
+  const roleAssignment = assignRoles(players, playerCacheMap, arch);
+
   const picks: Partial<Record<UserRole, string>> = {};
   const slots: PickSlot[] = [];
+  const usedChamps = new Set<string>();
 
   for (const role of USER_ROLES) {
     const player = roleAssignment[role] ?? null;
     const cache = player?.riotId ? (playerCacheMap.get(player.riotId) ?? null) : null;
-    const { slot, topPick } = selectChampions(role, player, arch, picks, cache);
+    const { slot, topPick } = selectChampions(role, player, arch, picks, cache, usedChamps);
 
-    // Label slot by player number
     if (slot.player && player) slot.player = `Player ${playerNumbers.get(player) ?? "?"}`;
 
     slots.push(slot);
-    if (topPick) picks[role] = topPick;
+    if (topPick) {
+      picks[role] = topPick;
+      usedChamps.add(topPick);
+    }
   }
 
   const synergies = scoreSynergies(picks);
@@ -636,6 +817,9 @@ async function buildComp(
   const engage = computeEngage(picks);
   const suggestedPlaystyle = computePlaystyle(arch);
   const detectedArchetype = detectArchetype(picks);
+  const damageProfile = computeDamageProfile(picks);
+  const hasFrontline = computeHasFrontline(picks);
+  const rangedCount = computeRangedCount(picks);
 
   // Archetype coherence: how cleanly the top picks execute the comp's strategy (0–10)
   const topPickNames = slots.map((s) => s.suggestions[0]?.champion).filter(Boolean) as string[];
@@ -645,10 +829,18 @@ async function buildComp(
         3) *
       10
     : 0;
-  // Synergy 60% + archetype coherence 40% — both always computable without personal data.
-  // Personal data (mastery + win rate) influences which champions get selected, which naturally
-  // pushes synergy and coherence higher for players who perform better on those champions.
-  const overallScore = Math.round(synergies.overall * 6 + archetypeCoherence * 4);
+
+  // Base 30 + synergy + coherence + CC. Penalties for structural weaknesses:
+  // -15 for unbalanced damage (all-AD or all-AP), -5 for no frontline.
+  const engageScore = engage === "Very High" ? 10 : engage === "High" ? 7 : engage === "Medium" ? 4 : 2;
+  const overallScore = Math.min(100, Math.max(0, Math.round(
+    30 +
+    synergies.overall * 4 +
+    archetypeCoherence * 2 +
+    engageScore -
+    (damageProfile.balanced ? 0 : 15) -
+    (hasFrontline ? 0 : 5)
+  )));
 
   const { description, winConditions } = await generateNarrative(detectedArchetype, picks, {
     difficulty,
@@ -676,7 +868,7 @@ async function buildComp(
     description,
     roleAssignment: roleAssignmentOut,
     picks: slots,
-    analysis: { difficulty, winConditions, powerSpike, synergies, suggestedPlaystyle, engage },
+    analysis: { difficulty, winConditions, powerSpike, synergies, suggestedPlaystyle, engage, damageProfile, hasFrontline, rangedCount, teamStats: computeTeamStats(picks, damageProfile) },
     cacheAgesAt,
   };
 }
@@ -781,8 +973,9 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const finalArchetypes = selected.slice(0, 5).map((a) => a.arch);
 
   // Stage 3: Generate all comps in parallel (LLM calls run concurrently)
+  // buildComp runs its own arch-specific role assignment for variation across comps
   const comps = await Promise.all(
-    finalArchetypes.map((arch) => buildComp(arch, roleAssignment, playerNumbers, playerCacheMap))
+    finalArchetypes.map((arch) => buildComp(arch, players, playerNumbers, playerCacheMap))
   );
 
   return ok({ comps });
